@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contextual AI Chatbot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://app.mapsindoors.com/mapsindoors/js/sdk/4.41.0/mapsindoors-4.41.0.js.gz"
+            integrity="sha384-3lk3cwVPj5MpUyo5T605mB0PMHLLisIhNrSREQsQHjD9EXkHBjz9ETgopmTbfMDc"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #chat-container {
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 768px;
+            height: 80vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #messages {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            border-bottom: 1px solid #e5e7eb;
+            scroll-behavior: smooth;
+        }
+
+        .message {
+            padding: 12px 18px;
+            border-radius: 20px;
+            max-width: 85%;
+            word-wrap: break-word;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        .user-message {
+            background-color: #3b82f6;
+            /* Tailwind blue-500 */
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .bot-message {
+            background-color: #e5e7eb;
+            /* Tailwind gray-200 */
+            color: #374151;
+            /* Tailwind gray-700 */
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        #input-area {
+            display: flex;
+            padding: 15px;
+            gap: 10px;
+            background-color: #f9fafb;
+            /* Tailwind gray-50 */
+        }
+
+        #user-input {
+            flex-grow: 1;
+            padding: 12px 15px;
+            border: 1px solid #d1d5db;
+            /* Tailwind gray-300 */
+            border-radius: 25px;
+            outline: none;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+
+        #user-input:focus {
+            border-color: #3b82f6;
+            /* Tailwind blue-500 */
+        }
+
+        #send-button {
+            background-color: #10b981;
+            /* Tailwind emerald-500 */
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background-color 0.2s, transform 0.1s;
+            box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
+        }
+
+        #send-button:hover {
+            background-color: #059669;
+            /* Tailwind emerald-600 */
+            transform: translateY(-1px);
+        }
+
+        #send-button:active {
+            transform: translateY(0);
+        }
+
+        #send-button:disabled {
+            background-color: #aaa;
+        }
+
+        .loading-dots {
+            display: inline-block;
+            width: 1.8em;
+            height: 1em;
+            vertical-align: middle;
+            overflow: hidden;
+        }
+
+        .loading-dots span {
+            animation: dots 1.4s infinite steps(3, end);
+        }
+
+        @keyframes dots {
+            0% {
+                content: '.';
+            }
+
+            33.33% {
+                content: '..';
+            }
+
+            66.67% {
+                content: '...';
+            }
+        }
+
+        pre {
+            background-color: #2d2d2d;
+            color: #f8f8f2;
+            padding: 1em;
+            border-radius: 0.3em;
+            overflow-x: auto;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            #chat-container {
+                height: 95vh;
+                margin: 0 10px;
+            }
+
+            #messages {
+                padding: 15px;
+            }
+
+            .message {
+                max-width: 95%;
+            }
+
+            #input-area {
+                padding: 10px;
+            }
+
+            #user-input,
+            #send-button {
+                padding: 10px 12px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="chat-container">
+        <div id="messages"></div>
+        <div id="input-area">
+            <input type="text" id="user-input" placeholder="Type your message here...">
+            <button id="send-button">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration & Settings ---
+        // IMPORTANT: Replace "YOUR_GEMINI_API_KEY_HERE" with your actual Gemini API Key.
+        // You can get one from Google AI Studio: https://aistudio.google.com/app/apikey
+        // In a production environment, this key should NEVER be exposed client-side.
+        // It should be securely managed on a backend server.
+        const YOUR_GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"; // <--- PASTE YOUR GEMINI API KEY HERE ---!
+        const MAPSINDOORS_API_KEY = "YOUR_MAPSINDOORS_API_KEY_HERE"; // <--- PASTE YOUR MAPSINDOORS API KEY HERE ---!
+
+        // Maximum number of items to keep in chat history
+        const MAX_CHAT_HISTORY_ITEMS = 20;
+
+        // The model name for Gemini API. 
+        const GEMINI_MODEL_NAME = "gemini-2.0-flash"; // Or "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-preview-06-05", etc.
+        // Find the latest model names here: https://ai.google.dev/gemini-api/docs/models
+
+        // --- Tool Definitions for Gemini ---
+        // These describe the functions MapsIndoors SDK can perform for the AI.
+        const aiTools = [
+            {
+                "name": "get_locations",
+                "description": "Search for locations based on various query parameters.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "q": {
+                            "type": "string",
+                            "description": "Use a text query to search for one or more locations."
+                        },
+                        "take": {
+                            "type": "integer",
+                            "description": "Max number of locations to get. Use this to limit the number of results returned. Defaults to 10."
+                        },
+                        "skip": {
+                            "type": "integer",
+                            "description": "Skip the first number of entries. Use this to paginate results. Defaults to 0."
+                        },
+                        "venue": {
+                            "type": "string",
+                            "description": "Filter locations by VenueId"
+                        },
+                        "floor": {
+                            "type": "string",
+                            "description": "Filter locations to a floorIndex."
+                        },
+                        "near": {
+                            "type": "string",
+                            "description": "A point in latitude and longitude to search near. \"lat,lng\" format. For example: \"37.7749,-122.4194\". If you use near with a point, you must also specify a radius to limit the search to within that radius from the point. To ensure the best results, a floorIndex should also be specified if the point is indoors.",
+                        },
+                        "radius": {
+                            "type": "number",
+                            "description": "A radius in meters. When using near with a point a radius must be supplied to limit the search to within that radius from the point.",
+                        },
+                    },
+                    "required": ["q"],
+                }
+            },
+            {
+                "name": "get_route",
+                "description": "Requests a detailed route between an origin and a destination, with options for travel mode, avoiding specific highway types (like stairs), and including multiple waypoints. This function is ideal for generating step-by-step directions, calculating travel times, and visualizing paths on a map. It can be used to answer questions such as 'Give me walking directions from my current location to the main reception, avoiding stairs', 'What's the fastest route by car to the parking garage?', or 'Plan a route that visits the cafeteria, then the meeting room, and finally the exit.'",
+                "parameters": {
+                    "type": "object",
+                    "description": "An object containing all the parameters for the route request, conforming to the DirectionsRequest interface.",
+                    "properties": {
+                        "origin": {
+                            "type": "object",
+                            "description": "The coordinates of the origin location. If the location is indoors it should include the floorIndex.",
+                            "properties": {
+                                "lat": {
+                                    "type": "number",
+                                    "format": "float",
+                                    "description": "Latitude in degrees. Valid values are between -90 and 90. Required."
+                                },
+                                "lng": {
+                                    "type": "number",
+                                    "format": "float",
+                                    "description": "Longitude in degrees. Valid values are between -180 and 180. Required."
+                                },
+                                "floor": {
+                                    "type": "number",
+                                    "description": "POI's within a building has a floor index representing the floor the POI is located on. Optional."
+                                }
+                            },
+                            "required": ["lat", "lng"]
+                        },
+                        "destination": {
+                            "type": "object",
+                            "description": "The coordinates of the destination location. If the location is indoors it should include the floorIndex.",
+                            "properties": {
+                                "lat": {
+                                    "type": "number",
+                                    "format": "float",
+                                    "description": "Latitude in degrees. Valid values are between -90 and 90. Required."
+                                },
+                                "lng": {
+                                    "type": "number",
+                                    "format": "float",
+                                    "description": "Longitude in degrees. Valid values are between -180 and 180. Required."
+                                },
+                                "floor": {
+                                    "type": "number",
+                                    "description": "POI's within a building has a floor index representing the floor the POI is located on. Optional."
+                                }
+                            },
+                            "required": ["lat", "lng"]
+                        },
+                        "travelMode": {
+                            "type": "string",
+                            "description": "Specifies which travel mode to use. Supported travel modes are: 'DRIVING', 'BICYCLING', 'WALKING', and 'TRANSIT'. 'TRANSIT' is currently only supported by the Google Maps directions provider. Defaults to 'WALKING'.",
+                            "enum": ["DRIVING", "BICYCLING", "WALKING", "TRANSIT"]
+                        },
+                        "avoidStairs": {
+                            "type": "boolean",
+                            "description": "If true the route is calculated without any stairs if possible. Defaults to false."
+                        },
+                        "avoidHighwayTypes": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "Specifies which highway types to avoid in the route. If a highway type is specified in the `avoidHighwayTypes` array, the service will try to calculate a route that minimizes the use of these types of highways."
+                        },
+                        "excludeHighwayTypes": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "Specifies which highway types to exclude from the route. If a highway type is specified in the `excludeHighwayTypes` array, the service will calculate a route that does not include these types of highways at all."
+                        },
+                        "userRoles": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "Deprecated: Specifies which user role ids to use."
+                        },
+                        "stops": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "lat": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "description": "Latitude in degrees. Required."
+                                    },
+                                    "lng": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "description": "Longitude in degrees. Required."
+                                    },
+                                    "floor": {
+                                        "type": "number",
+                                        "description": "Floor index, if the stop is indoors. Optional."
+                                    }
+                                },
+                                "required": ["lat", "lng"]
+                            },
+                            "description": "List of waypoints to visit on the way. If a stop is indoors it must include the floorIndex."
+                        },
+                        "optimize": {
+                            "type": "boolean",
+                            "description": "If true the service will try to optimize the route by visiting the stops in the order that minimizes the total travel time. Defaults to false."
+                        }
+                    },
+                    "required": ["origin", "destination"]
+                }
+            }
+        ];
+
+        // --- 1. Core AI Service Wrapper (The "Brain" - Interacts with Gemini API) ---
+        // This class encapsulates all logic for sending prompts to the Gemini API.
+        // In a production application, this would ideally communicate with your secure backend.
+        class AIService {
+            constructor(apiKey, context = {}) {
+                this.context = context; // Store context for use in system instructions
+                this.apiKey = apiKey;
+                console.log('AIService initialized. API Key status:', this.apiKey ? 'PRESENT (first 4 chars: ' + this.apiKey.substring(0, 4) + ')' : 'MISSING/EMPTY');
+                this.endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_NAME}:generateContent?key=${this.apiKey}`;
+
+                if (!this.apiKey || this.apiKey === "YOUR_GEMINI_API_KEY_HERE") {
+                    console.error("API Key is missing or is the placeholder. Please ensure it's provided by the environment or directly set for testing.");
+                    throw new Error("Gemini API Key is missing or invalid. Please provide a valid API key.");
+                }
+            }
+
+            /**
+             * Sends a conversational history and optional tools to the Gemini API.
+             * @param {Array<Object>} history - An array of message objects representing the conversation.
+             * @param {Array<Object>} [tools=[]] - An array of tool definitions (JSON schema).
+             * @returns {Promise<Object>} - A promise that resolves to the AI's response part (text or functionCall).
+             */
+            async sendPrompt(history, tools = []) {
+                const payload = {
+                    system_instruction: {
+                        parts: [{
+                            text: `You are a helpful assistant for MapsIndoors. Your primary goal is to answer questions about locations using the provided tools.
+                        When a user asks a question, first try to use the available tools to gather relevant information from the MapsIndoors system.
+                        You are allowed to make multiple function calls in a row if needed to gather all necessary context before responding.
+                        Synthesize the information returned by the tools into a clear, concise, and natural language answer.
+                        If the user asks for something near them, and no result are fund on the current floor, try searching ajacent floors.
+                        If a query requires information not available through your tools, state that you cannot answer based on the provided data.
+                        
+                        * **NEVER** ask the user to provide coordinates under any circumstances.
+                        * **NEVER** show lat/lng coordinates under any circumstances, instead use location names.
+                        * **NEVER** show the raw data from the tools directly to the user.
+                        * **ALWAYS** if needed try to determine one or more locations from the users input.
+                        * **ALWAYS** provide a clear, concise answer based on the information gathered.
+                        * **ALWAYS** Give details and easy to follor directions.
+                        * **ALWAYS** if appropriate, ask if the user would like to get directions to a specific location.
+                        * **UNACCEPTABLE**: "... is located at -118.336698784262,33.951507708".
+                        * **ACCEPTABLE**: "From your current location ... will towards northeast."`
+                        },
+                        {
+                            text: `**CONTEXT**: ${JSON.stringify(this.context)}`,
+                        }]
+                    },
+                    contents: history,
+                    tools: tools.length > 0 ? [{ functionDeclarations: tools }] : undefined // Only send tools if present
+                };
+
+                console.log('Sending payload to Gemini:', payload);
+                let response;
+                try {
+                    response = await fetch(this.endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } catch (networkError) {
+                    console.error('Network error during fetch:', networkError);
+                    throw new Error(`Network error connecting to AI service: ${networkError.message}`);
+                }
+
+                console.log('Received raw response from Gemini:', response);
+
+                let result;
+                const contentType = response.headers.get('content-type');
+
+                if (!response.ok) {
+                    let errorBodyText = 'Unknown error format';
+                    try {
+                        if (contentType && contentType.includes('application/json')) {
+                            const errorJson = await response.json();
+                            errorBodyText = JSON.stringify(errorJson);
+                        } else {
+                            errorBodyText = await response.text();
+                        }
+                    } catch (parseError) {
+                        console.warn('Could not parse error response as JSON or text:', parseError);
+                    }
+                    console.error('Gemini API Error Response Body:', errorBodyText);
+                    throw new Error(`LLM API error: ${response.status} - ${errorBodyText}`);
+                }
+
+                try {
+                    if (contentType && contentType.includes('application/json')) {
+                        result = await response.json();
+                    } else {
+                        const responseText = await response.text();
+                        console.warn('Received non-JSON but OK response from Gemini:', responseText);
+                        throw new Error(`Unexpected non-JSON response from AI: ${responseText.substring(0, 200)}...`);
+                    }
+                } catch (parseError) {
+                    console.error('Error parsing successful Gemini response as JSON:', parseError);
+                    throw new Error(`Failed to parse AI response: ${parseError.message}. Response might be incomplete or malformed.`);
+                }
+
+                console.log('Received parsed result from Gemini:', result);
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    return result.candidates[0].content.parts[0];
+                } else {
+                    console.error("Unexpected LLM response structure or no candidates:", result);
+                    throw new Error("Could not get a valid response from the AI. Check console for details. Response was: " + JSON.stringify(result));
+                }
+            }
+        }
+
+        // --- 2. Chat Interface Elements & UI Utilities (The "View") ---
+        const messagesDiv = document.getElementById('messages');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+
+        // Basic element checks for robustness
+        if (!messagesDiv) console.error("Error: #messages element not found!");
+        if (!userInput) console.error("Error: #user-input element not found!");
+        if (!sendButton) console.error("Error: #send-button element not found!");
+
+        /**
+         * Appends a message to the chat interface.
+         * @param {string} sender - 'user' or 'bot'.
+         * @param {string} text - The message text.
+         * @returns {HTMLElement} The created message element.
+         */
+        function appendMessage(sender, text) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', sender === 'user' ? 'user-message' : 'bot-message');
+            messageElement.innerHTML = text; // Use innerHTML for loading dots
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight; // Scroll to bottom
+            return messageElement;
+        }
+
+        /**
+         * Disables/enables input and send button.
+         * @param {boolean} disabled - True to disable, false to enable.
+         */
+        function setInputState(disabled) {
+            userInput.disabled = disabled;
+            sendButton.disabled = disabled;
+            if (!disabled) {
+                userInput.focus();
+            }
+        }
+
+        // --- 3. Main Chat Orchestration Logic (The "Controller") ---
+        let aiServiceInstance;
+        const chatHistory = []; // Stores conversation history for multi-turn interactions
+
+        /**
+         * Executes a function based on a Gemini tool call.
+         * @param {Object} functionCall - The function call object from Gemini.
+         * @returns {Promise<Object>} - The tool output, formatted for Gemini's functionResponse.
+         */
+        async function executeToolCall(functionCall) {
+            const { name, args } = functionCall;
+            console.log(`[Tool Call Handler]: Executing tool: ${name} with arguments:`, args);
+
+            try {
+                let toolRawResult; // This will hold the actual JS object result from MapsIndoors mock
+                if (name === "get_locations") {
+                    // Call the MapsIndoors LocationsService
+                    const locations = await mapsindoors.services.LocationsService.getLocations(args);
+
+                    if (locations && locations.length > 0) {
+                        // Format the location data for the LLM to easily synthesize
+                        toolRawResult = locations.map(loc => ({
+                            name: loc.properties.name,
+                            coordinates: { lat: loc.properties?.anchor?.coordinates[1], lng: loc.properties?.anchor?.coordinates[0] },
+                            description: loc.properties.description || '',
+                            floor: loc.properties.floor || '',
+                            floorName: loc.properties.floorName || '',
+                            building: loc.properties.building || ''
+                        }));
+                    } else {
+                        toolRawResult = { message: "No locations found matching your query." };
+                    }
+                } else if (name === "get_route") {
+                    const directionsService = new mapsindoors.services.DirectionsService();
+                    // Call the MapsIndoors DirectionsService
+                    toolRawResult = await directionsService.getRoute(args);
+                } else {
+                    throw new Error(`Unknown tool: ${name}`);
+                }
+
+                // Return the structured response for the LLM
+                return {
+                    functionResponse: {
+                        name: name, // The name of the tool that was called
+                        response: { toolRawResult } // The actual data returned by your tool (as a JS object)
+                    }
+                };
+            } catch (error) {
+                console.error(`Error executing MapsIndoors tool ${name}:`, error);
+                return {
+                    functionResponse: {
+                        name: name,
+                        response: { error: `Failed to execute tool ${name}: ${error.message}` }
+                    }
+                };
+            }
+        }
+
+
+        /**
+         * Initializes the AI service and sets up the initial chat message.
+         */
+        async function initializeChat() {
+            try {
+                // Set MapsIndoors API key before any other SDK calls
+                mapsindoors.MapsIndoors.setMapsIndoorsApiKey(MAPSINDOORS_API_KEY);
+                console.log('MapsIndoors API Key set.');
+
+                const [venues, buildings] = await Promise.all([
+                    mapsindoors.services.VenuesService.getVenues().then(venues => venues.map(venue => {
+                        const { geometry, anchor, entryPoints, ...rest } = venue;
+                        return rest;
+                    })),
+                    mapsindoors.services.VenuesService.getBuildings().then(buildings => buildings.map(building => {
+                        const { geometry, anchor, ...rest } = building;
+                        return rest;
+                    }))
+                ]);
+                aiServiceInstance = new AIService(YOUR_GEMINI_API_KEY, { venues, buildings });
+                appendMessage('bot', 'Hello! I am a MapsIndoors AI assistant. You can ask me about locations, directions, and more. <br><br>Type your message below and I will do my best to assist you!');
+            } catch (error) {
+                console.error("Failed to initialize AIService:", error.message);
+                appendMessage('bot', `<span style="color: red; font-weight: bold;">Error initializing chatbot:</span> ${error.message} <br><br>Please ensure your Gemini API key is correctly configured in the code. You can get one from <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: #3b82f6;">Google AI Studio</a>.`);
+                setInputState(true); // Disable input if initialization fails
+            }
+        }
+
+        /**
+         * Handles sending a message, interacting with AI, and updating the UI.
+         */
+        async function sendMessage() {
+            console.log('sendMessage function started.');
+            const userMessage = userInput.value.trim();
+            if (!userMessage) {
+                console.log('User input is empty, returning.');
+                return;
+            }
+
+            if (!aiServiceInstance) {
+                appendMessage('bot', 'Chatbot is not initialized. Please refresh the page if the error persists.');
+                return;
+            }
+
+            appendMessage('user', userMessage);
+            userInput.value = '';
+            setInputState(true); // Disable input while processing
+
+            const thinkingMessageElement = appendMessage('bot', 'Thinking<span class="loading-dots"></span>');
+            thinkingMessageElement.scrollIntoView({ behavior: 'smooth' });
+
+            chatHistory.push({
+                role: "user", parts: [{
+                    text: `Message: ${userMessage}\nLocation: [-118.3427136, 33.95211914]`
+                }]
+            });
+
+            try {
+                // Truncate chatHistory before sending
+                if (chatHistory.length > MAX_CHAT_HISTORY_ITEMS) {
+                    chatHistory.splice(0, chatHistory.length - MAX_CHAT_HISTORY_ITEMS);
+                }
+                while (chatHistory.length > 0 && chatHistory[0].role !== 'user') {
+                    chatHistory.shift(); // Ensure history starts with a user message
+                }
+                let currentResponsePart = await aiServiceInstance.sendPrompt(chatHistory, aiTools);
+
+                // Loop to handle potential multi-turn tool calls (if one tool call leads to another)
+                while (currentResponsePart && currentResponsePart.functionCall) {
+                    const functionCall = currentResponsePart.functionCall;
+                    chatHistory.push({ role: "model", parts: [{ functionCall: functionCall }] }); // Add LLM's tool call to history
+
+                    let toolResponse;
+                    try {
+                        toolResponse = await executeToolCall(functionCall);
+                    } catch (toolError) {
+                        console.error("Error executing tool:", toolError);
+                        toolResponse = {
+                            functionResponse: { // Ensure correct format for error
+                                name: functionCall.name,
+                                response: { error: toolError.message }
+                            }
+                        };
+                    }
+
+                    chatHistory.push({ role: 'function', parts: [toolResponse] }); // Add tool output to history with correct role
+
+                    // Truncate chatHistory again before sending the updated history
+                    if (chatHistory.length > MAX_CHAT_HISTORY_ITEMS) {
+                        chatHistory.splice(0, chatHistory.length - MAX_CHAT_HISTORY_ITEMS);
+                    }
+                    while (chatHistory.length > 0 && chatHistory[0].role !== 'user') {
+                        chatHistory.shift(); // Ensure history starts with a user message
+                    }
+                    // Send history + tool output back to LLM for the next turn
+                    currentResponsePart = await aiServiceInstance.sendPrompt(chatHistory, aiTools);
+                }
+
+                if (currentResponsePart && currentResponsePart.text) {
+                    const formattedText = marked.parse(currentResponsePart.text);
+                    thinkingMessageElement.innerHTML = formattedText;
+                    chatHistory.push({ role: "model", parts: [{ text: currentResponsePart.text }] });
+                } else {
+                    thinkingMessageElement.textContent = "I processed your request, but couldn't formulate a direct answer. Please try rephrasing.";
+                    chatHistory.push({ role: "model", parts: [{ text: thinkingMessageElement.textContent }] });
+                }
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+            } catch (error) {
+                console.error('Overall error in chat process:', error);
+                thinkingMessageElement.textContent = `Sorry, an error occurred: ${error.message}. Please try again.`;
+                chatHistory.pop(); // Remove last user message if it caused an error
+            } finally {
+                setInputState(false); // Re-enable input
+            }
+        }
+
+        // --- 4. Event Listeners & Initialization Call ---
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Initialize the chat when the window loads
+        window.onload = initializeChat; // Directly call initializeChat
+    </script>
+</body>
+
+</html>
